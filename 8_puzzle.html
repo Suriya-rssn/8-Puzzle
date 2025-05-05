@@ -51,11 +51,40 @@
             font-weight: bold;
             border-radius: 5px;
             cursor: pointer;
-            transition: all 0.2s ease;
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
         }
         .tile:hover {
             transform: scale(1.05);
             background-color: #2980b9;
+            box-shadow: 0 0 15px rgba(52, 152, 219, 0.7);
+        }
+        .tile::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: linear-gradient(225deg, rgba(255,255,255,0.3) 0%, rgba(255,255,255,0) 50%);
+            border-radius: 5px;
+        }
+        .tile.moving {
+            animation: tileMove 0.3s ease-out;
+            z-index: 10;
+        }
+        @keyframes tileMove {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.1); }
+            100% { transform: scale(1); }
+        }
+        .tile.solved {
+            animation: pulsate 0.5s ease-in-out infinite alternate;
+        }
+        @keyframes pulsate {
+            0% { transform: scale(1); background-color: #3498db; }
+            100% { transform: scale(1.05); background-color: #27ae60; }
         }
         .empty {
             background-color: #34495e;
@@ -94,6 +123,11 @@
             text-align: center;
             margin: 20px 0;
             display: none;
+            animation: fadeInScale 0.5s ease-out;
+        }
+        @keyframes fadeInScale {
+            0% { opacity: 0; transform: scale(0.8); }
+            100% { opacity: 1; transform: scale(1); }
         }
         .solution-steps {
             width: 100%;
@@ -144,12 +178,15 @@
         <div class="controls">
             <button id="new-game">New Game</button>
             <button id="solve">Show Solution</button>
+            <button id="toggle-sound">Sound: On</button>
         </div>
         
         <div class="stats">
             <p>Moves: <span id="moves">0</span></p>
             <p>Target Configuration:</p>
-            <div class="solution-board" id="target-board"></div>
+            <div class="target-container">
+                <div class="solution-board" id="target-board"></div>
+            </div>
         </div>
         
         <div class="win-message" id="win-message">
@@ -322,24 +359,41 @@
             if ((Math.abs(row - emptyTileX) === 1 && col === emptyTileY) || 
                 (Math.abs(col - emptyTileY) === 1 && row === emptyTileX)) {
                 
-                // Swap the tiles
-                [gameBoard[row][col], gameBoard[emptyTileX][emptyTileY]] = [gameBoard[emptyTileX][emptyTileY], gameBoard[row][col]];
+                // Add animation class to the clicked tile
+                event.target.classList.add('moving');
                 
-                // Update empty tile position
-                emptyTileX = row;
-                emptyTileY = col;
-                
-                // Update move count
-                moveCount++;
-                document.getElementById('moves').textContent = moveCount;
-                
-                // Redraw the board
-                createBoard(document.getElementById('game-board'), gameBoard);
-                
-                // Check if puzzle is solved
-                if (checkWin()) {
-                    document.getElementById('win-message').style.display = 'block';
-                }
+                setTimeout(() => {
+                    // Swap the tiles
+                    [gameBoard[row][col], gameBoard[emptyTileX][emptyTileY]] = [gameBoard[emptyTileX][emptyTileY], gameBoard[row][col]];
+                    
+                    // Update empty tile position
+                    emptyTileX = row;
+                    emptyTileY = col;
+                    
+                    // Update move count
+                    moveCount++;
+                    document.getElementById('moves').textContent = moveCount;
+                    
+                    // Redraw the board
+                    createBoard(document.getElementById('game-board'), gameBoard);
+                    
+                    // Check if puzzle is solved
+                    if (checkWin()) {
+                        document.getElementById('win-message').style.display = 'block';
+                        
+                        // Add animation to all tiles
+                        const tiles = document.querySelectorAll('.tile:not(.empty)');
+                        tiles.forEach(tile => {
+                            tile.classList.add('solved');
+                        });
+                        
+                        // Play victory sound
+                        playSound('win');
+                    } else {
+                        // Play move sound
+                        playSound('move');
+                    }
+                }, 150);
             }
         }
         
@@ -430,9 +484,68 @@
             return (blankRow % 2 === 0) ? (inversions % 2 === 1) : (inversions % 2 === 0);
         }
         
+        // Sound control
+        let soundEnabled = true;
+        
+        function playSound(type) {
+            if (!soundEnabled) return;
+            
+            const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            const oscillator = audioContext.createOscillator();
+            const gainNode = audioContext.createGain();
+            
+            oscillator.connect(gainNode);
+            gainNode.connect(audioContext.destination);
+            
+            if (type === 'move') {
+                oscillator.frequency.value = 440; // A4 note
+                gainNode.gain.value = 0.1;
+                oscillator.start();
+                gainNode.gain.exponentialRampToValueAtTime(0.001, audioContext.currentTime + 0.2);
+                oscillator.stop(audioContext.currentTime + 0.2);
+            } else if (type === 'win') {
+                // Play a victory melody
+                const notes = [523.25, 659.25, 783.99, 1046.50]; // C5, E5, G5, C6
+                const duration = 0.15;
+                
+                notes.forEach((note, i) => {
+                    const noteOscillator = audioContext.createOscillator();
+                    const noteGain = audioContext.createGain();
+                    
+                    noteOscillator.connect(noteGain);
+                    noteGain.connect(audioContext.destination);
+                    
+                    noteOscillator.frequency.value = note;
+                    noteGain.gain.value = 0.2;
+                    
+                    const startTime = audioContext.currentTime + i * duration;
+                    noteOscillator.start(startTime);
+                    noteGain.gain.exponentialRampToValueAtTime(0.001, startTime + duration);
+                    noteOscillator.stop(startTime + duration);
+                });
+            } else if (type === 'newGame') {
+                oscillator.frequency.value = 330; // E4 note
+                gainNode.gain.value = 0.2;
+                oscillator.start();
+                gainNode.gain.exponentialRampToValueAtTime(0.001, audioContext.currentTime + 0.3);
+                oscillator.stop(audioContext.currentTime + 0.3);
+            }
+        }
+        
+        function toggleSound() {
+            soundEnabled = !soundEnabled;
+            document.getElementById('toggle-sound').textContent = `Sound: ${soundEnabled ? 'On' : 'Off'}`;
+        }
+        
         function startNewGame() {
             document.getElementById('win-message').style.display = 'none';
             document.getElementById('solution-steps').style.display = 'none';
+            
+            // Remove solved animation from tiles
+            const tiles = document.querySelectorAll('.tile');
+            tiles.forEach(tile => {
+                tile.classList.remove('solved');
+            });
             
             moveCount = 0;
             document.getElementById('moves').textContent = moveCount;
@@ -444,6 +557,22 @@
             
             createBoard(document.getElementById('game-board'), gameBoard);
             createBoard(document.getElementById('target-board'), finalState, false);
+            
+            // Play new game sound
+            playSound('newGame');
+            
+            // Add shuffle animation
+            setTimeout(() => {
+                const tiles = document.querySelectorAll('.tile:not(.empty)');
+                tiles.forEach((tile, index) => {
+                    setTimeout(() => {
+                        tile.classList.add('moving');
+                        setTimeout(() => {
+                            tile.classList.remove('moving');
+                        }, 300);
+                    }, index * 50);
+                });
+            }, 100);
         }
         
         function showSolution() {
@@ -473,8 +602,19 @@
             document.getElementById('hide-solution').addEventListener('click', () => {
                 document.getElementById('solution-steps').style.display = 'none';
             });
+            document.getElementById('toggle-sound').addEventListener('click', toggleSound);
             
-            startNewGame();
+            // Add entrance animation to the board
+            const gameBoard = document.getElementById('game-board');
+            gameBoard.style.opacity = '0';
+            gameBoard.style.transform = 'scale(0.9)';
+            gameBoard.style.transition = 'all 0.5s ease-out';
+            
+            setTimeout(() => {
+                gameBoard.style.opacity = '1';
+                gameBoard.style.transform = 'scale(1)';
+                startNewGame();
+            }, 300);
         });
     </script>
 </body>
